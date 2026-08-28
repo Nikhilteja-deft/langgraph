@@ -21,6 +21,8 @@ class Items(BaseModel):
     price: float
     tax: float | None = None
 
+sample_items= Items(name="apple", description="red", price=100, tax=10)
+
 
 @app.get("/")
 async def root():
@@ -35,7 +37,7 @@ async def say_hello(name: str):
 
 @app.post("/items/")
 async def create_item(item: Items):
-    response = item | {"id": 1}
+    response = item or sample_items
     return response
 
 @app.get("/home/{item_id}")
