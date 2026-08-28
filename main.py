@@ -1,7 +1,13 @@
-from fastapi import FastAPI
+import fastapi_jsonrpc as jsonrpc
+from fastapi import Body
 from pydantic import BaseModel
 
-app = FastAPI()
+
+# so the json rpc is built on top of the fast api
+app = jsonrpc.API()
+# so all the json rpc calls come to this end point
+rpc = jsonrpc.Entrypoint("/rpc")
+
 
 class Item(BaseModel):
     name: str
@@ -35,3 +41,24 @@ async def create_item(item: Items):
 @app.get("/home/{item_id}")
 def read_item(item_id: int):
     return f"Welcome to the home page {item_id}"
+
+
+# JSON-RPC method
+@rpc.method()
+def add_items(
+    a: int = Body(...),
+    b: int = Body(...),
+) -> int:
+    return a + b
+
+
+# JSON-RPC method
+@rpc.method()
+def subtract_items(
+    a: int = Body(...),
+    b: int = Body(...),
+) -> int:
+    return a - b
+
+# Connect the /rpc entrypoint to the application
+app.bind_entrypoint(rpc)
