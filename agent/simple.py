@@ -1,11 +1,17 @@
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel
+from typing import Annotated
+from pydantic import Field
+import operator
+
 
 
 class ProtocolState(BaseModel):
     protocol_id: str
     old_version: str
     new_version: str
+
+    changes: Annotated[list[str], operator.add] = Field(default_factory=list)
 
     protocol_exists: bool = False
     changes_found: bool = False
@@ -41,10 +47,14 @@ def compare_protocols(state: ProtocolState):
 
 
 def extract_changes(state: ProtocolState):
-    print("Checking for changes...")
+    if state.old_version != state.new_version:
+        return {
+            "changes_found": True,
+            "changes": ["Protocol version changed"]
+        }
 
     return {
-        "changes_found": state.old_version != state.new_version
+        "changes_found": False
     }
 
 
