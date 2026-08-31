@@ -491,125 +491,141 @@ graph = builder.compile(
     checkpointer=checkpointer
 )
 
+"""
+KEEP OUTSIDE __main__
+─────────────────────
+State
+nodes
+routers
+builder
+nodes registration
+edges
+InMemorySaver
+graph = builder.compile(...)
 
-# ============================================================
-# 18. THREAD ID
-# ============================================================
 
-config = {
-    "configurable": {
-        "thread_id":
-            "protocol-PROTOCOL-001-review-001"
+PUT INSIDE __main__
+─────────────────────
+config
+graph.invoke(...)
+get_state(...)
+input(...)
+Command(resume=...)
+prints
+
+"""
+
+if __name__=="__main__":
+
+    # ============================================================
+    # 18. THREAD ID
+    # ============================================================
+
+    config = {
+        "configurable": {
+            "thread_id":
+                "protocol-PROTOCOL-001-review-001"
+        }
     }
-}
 
+    # ============================================================
+    # FIRST RUN
+    # ============================================================
 
-# ============================================================
-# FIRST RUN
-# ============================================================
+    print("\n========== STARTING GRAPH ==========\n")
 
-print("\n========== STARTING GRAPH ==========\n")
+    result = graph.invoke(
+        {
+            "protocol_id":
+                "PROTOCOL-001",
 
-result = graph.invoke(
-    {
-        "protocol_id":
-            "PROTOCOL-001",
+            "old_version":
+                "v1",
 
-        "old_version":
-            "v1",
+            "new_version":
+                "v2"
+        },
 
-        "new_version":
-            "v2"
-    },
+        config=config
+    )
 
-    config=config
-)
+    # ============================================================
+    # GRAPH SHOULD NOW BE PAUSED
+    # ============================================================
 
+    print("\n========== INTERRUPTED ==========\n")
 
-# ============================================================
-# GRAPH SHOULD NOW BE PAUSED
-# ============================================================
+    print(result)
 
-print("\n========== INTERRUPTED ==========\n")
+    # ============================================================
+    # 19. INSPECT PERSISTED STATE
+    # ============================================================
 
-print(result)
+    snapshot = graph.get_state(config)
 
+    print("\n========== SAVED CHECKPOINT ==========\n")
 
-# ============================================================
-# 19. INSPECT PERSISTED STATE
-# ============================================================
+    print("Saved state:")
+    print(snapshot.values)
 
-snapshot = graph.get_state(config)
+    print("\nNext node:")
+    print(snapshot.next)
 
-print("\n========== SAVED CHECKPOINT ==========\n")
+    # ============================================================
+    # SIMULATE HUMAN REVIEWER
+    # ============================================================
 
-print("Saved state:")
-print(snapshot.values)
+    print("\n========== HUMAN REVIEW ==========\n")
 
-print("\nNext node:")
-print(snapshot.next)
-
-
-# ============================================================
-# SIMULATE HUMAN REVIEWER
-# ============================================================
-
-print("\n========== HUMAN REVIEW ==========\n")
-
-decision = input(
-    "Enter decision "
-    "(approve / revise / reject): "
-).strip().lower()
-
-
-while decision not in {
-    "approve",
-    "revise",
-    "reject"
-}:
     decision = input(
-        "Invalid decision. "
-        "Enter approve / revise / reject: "
+        "Enter decision "
+        "(approve / revise / reject): "
     ).strip().lower()
 
+    while decision not in {
+        "approve",
+        "revise",
+        "reject"
+    }:
+        decision = input(
+            "Invalid decision. "
+            "Enter approve / revise / reject: "
+        ).strip().lower()
 
-comment = input(
-    "Reviewer comment: "
-)
+    comment = input(
+        "Reviewer comment: "
+    )
 
+    # ============================================================
+    # 21. COMMAND(RESUME=...)
+    # ============================================================
 
-# ============================================================
-# 21. COMMAND(RESUME=...)
-# ============================================================
+    print("\n========== RESUMING GRAPH ==========\n")
 
-print("\n========== RESUMING GRAPH ==========\n")
+    final_result = graph.invoke(
+        Command(
+            resume={
+                "action": decision,
+                "comment": comment
+            }
+        ),
 
-final_result = graph.invoke(
-    Command(
-        resume={
-            "action": decision,
-            "comment": comment
-        }
-    ),
+        # SAME thread_id is critical
+        config=config
+    )
 
-    # SAME thread_id is critical
-    config=config
-)
+    # ============================================================
+    # FINAL RESULT
+    # ============================================================
 
+    print("\n========== FINAL STATE ==========\n")
 
-# ============================================================
-# FINAL RESULT
-# ============================================================
+    print(final_result)
 
-print("\n========== FINAL STATE ==========\n")
+    # ============================================================
+    # SHOW IDEMPOTENT REVIEW RECORD
+    # ============================================================
 
-print(final_result)
+    print("\n========== REVIEW STORE ==========\n")
 
-
-# ============================================================
-# SHOW IDEMPOTENT REVIEW RECORD
-# ============================================================
-
-print("\n========== REVIEW STORE ==========\n")
-
-print(REVIEW_STORE)
+    print(REVIEW_STORE)
