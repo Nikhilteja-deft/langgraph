@@ -1,17 +1,36 @@
-from langgraph.graph import StateGraph, MessagesState, START, END
+from langgraph.graph import StateGraph, START, END
+from pydantic import BaseModel
 
-def mock_llm(state: MessagesState):
-    return {"messages": [{"role": "ai", "content": "hello world"}]}
 
-def extract_trails(state: MessagesState):
-    return {"message": [{"role": "ai", "content": "trailer world"}]}
+class ProtocolState(BaseModel):
+    protocol_id: str
+    old_version: str
+    new_version: str
 
-graph = StateGraph(MessagesState)
-graph.add_node(mock_llm)
-graph.add_edge(START, "mock_llm")
-graph.add_edge("mock_llm", END)
+
+def compare_protocols(state: ProtocolState):
+    print(state.protocol_id)
+
+    return {
+        "old_version": state.old_version,
+        "new_version": state.new_version,
+    }
+
+
+graph = StateGraph(ProtocolState)
+
+graph.add_node(compare_protocols)
+
+graph.add_edge(START, "compare_protocols")
+graph.add_edge("compare_protocols", END)
+
 graph = graph.compile()
 
-response = graph.invoke({"messages": [{"role": "user", "content": "hi!"}]})
+
+response = graph.invoke({
+    "protocol_id": "PROTOCOL-001",
+    "old_version": "v1",
+    "new_version": "v2"
+})
 
 print(response)
