@@ -60,7 +60,7 @@ def extract_changes(state: ProtocolState):
 
 def route_changes(state: ProtocolState):
     if state.changes_found:
-        return "assess_impact"
+        return "analyze_changes"
 
     return END
 
@@ -72,6 +72,25 @@ def assess_impact(state: ProtocolState):
         "impact": "Potential site impact detected"
     }
 
+def check_eligibility(state: ProtocolState):
+    print("Checking eligibility changes")
+
+    return {
+        "changes": ["Eligibility criteria changed"]
+    }
+
+
+def check_schedule(state: ProtocolState):
+    print("Checking schedule changes")
+
+    return {
+        "changes": ["Visit schedule changed"]
+    }
+def analyze_changes(state: ProtocolState):
+    print("Analyzing detected changes")
+
+    return {}
+
 
 graph = StateGraph(ProtocolState)
 
@@ -79,6 +98,9 @@ graph.add_node(retrieve_protocol)
 graph.add_node(compare_protocols)
 graph.add_node(extract_changes)
 graph.add_node(assess_impact)
+graph.add_node(check_eligibility)
+graph.add_node(check_schedule)
+graph.add_node(analyze_changes)
 
 
 graph.add_edge(
@@ -95,16 +117,30 @@ graph.add_edge(
     "compare_protocols",
     "extract_changes"
 )
+graph.add_edge(
+    "analyze_changes",
+    "check_eligibility"
+)
+
+graph.add_edge(
+    "analyze_changes",
+    "check_schedule"
+)
+graph.add_edge(
+    "check_eligibility",
+    "assess_impact"
+)
+
+graph.add_edge(
+    "check_schedule",
+    "assess_impact"
+)
 
 graph.add_conditional_edges(
     "extract_changes",
     route_changes
 )
 
-graph.add_edge(
-    "assess_impact",
-    END
-)
 
 
 graph = graph.compile()
