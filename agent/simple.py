@@ -1,32 +1,46 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send, RetryPolicy
+from langgraph.types import Send, RetryPolicy, interrupt, Command
 from langgraph.runtime import Runtime
+from langgraph.checkpoint.memory import InMemorySaver
 
 from pydantic import BaseModel, Field
 from typing import Annotated
 import operator
 
 
-# ==================================================
+# ============================================================
+# MOCK DATABASE FOR IDEMPOTENCY DEMO
+# ============================================================
+
+# Pretend this is an Aurora/PostgreSQL review table.
+#
+# We use a deterministic key and UPSERT behavior.
+# Running the same write again replaces the same record
+# instead of creating duplicates.
+
+REVIEW_STORE = {}
+
+
+# ============================================================
 # STATE
-# ==================================================
+# ============================================================
 
 class ProtocolState(BaseModel):
     protocol_id: str
     old_version: str
     new_version: str
 
-    # Reducer: accumulate detected changes
+    # Reducer
     changes: Annotated[list[str], operator.add] = Field(
         default_factory=list
     )
 
-    # Reducer: collect results from Send workers
+    # Reducer for Send worker results
     analyzed_changes: Annotated[list[str], operator.add] = Field(
         default_factory=list
     )
 
-    # Reducer: accumulate retrieved evidence
+    # Reducer
     evidence: Annotated[list[str], operator.add] = Field(
         default_factory=list
     )
@@ -39,10 +53,20 @@ class ProtocolState(BaseModel):
     evidence_sufficient: bool = False
     evidence_attempts: int = 0
 
+    # -----------------------------
+    # HITL STATE
+    # -----------------------------
 
-# ==================================================
+    review_decision: str | None = None
+    review_comment: str | None = None
+    review_status: str = "pending"
+
+    review_recorded: bool = False
+
+
+# ============================================================
 # NODES
-# ==================================================
+# ============================================================
 
 def retrieve_protocol(
     state: ProtocolState,
@@ -50,9 +74,16 @@ def retrieve_protocol(
 ):
     attempt = runtime.execution_info.node_attempt
 
-    print(f"Retrieve protocol attempt: {attempt}")
+    print(
+        f"Retrieve protocol attempt: {attempt}"
+    )
 
-    # Mock technical failure on first attempt
+    # --------------------------------------------------------
+    # RETRY DEMO
+    # --------------------------------------------------------
+    # Pretend Aurora/network fails once.
+    # Remove this mocked failure later.
+
     if attempt == 1:
         print("Temporary database connection failure")
 
@@ -86,13 +117,12 @@ def compare_protocols(state: ProtocolState):
 
 def extract_changes(state: ProtocolState):
 
-    # Mock changes for now.
-    # Later an LLM/comparison service can generate these.
-
     if state.old_version != state.new_version:
 
         return {
             "changes_found": True,
+
+            # Mocked for now
             "changes": [
                 "Eligibility criteria changed",
                 "Visit schedule changed",
@@ -105,8 +135,10 @@ def extract_changes(state: ProtocolState):
     }
 
 
-# Send gives this node a custom dictionary,
-# not the entire ProtocolState object.
+# ------------------------------------------------------------
+# SEND WORKER
+# ------------------------------------------------------------
+
 def analyze_change(state: dict):
 
     current_change = state["current_change"]
@@ -127,7 +159,8 @@ def assess_impact(state: ProtocolState):
     print("Assessing impact...")
 
     # First assessment:
-    # we intentionally say evidence is insufficient.
+    # evidence is intentionally insufficient
+
     if state.evidence_attempts == 0:
 
         print("Evidence is insufficient")
@@ -137,11 +170,11 @@ def assess_impact(state: ProtocolState):
             "impact": "More evidence required"
         }
 
-    # After retrieve_evidence has executed
     print("Evidence is sufficient")
 
     return {
         "evidence_sufficient": True,
+
         "impact":
             "Potential site impact detected "
             "with supporting evidence"
@@ -164,9 +197,120 @@ def retrieve_evidence(state: ProtocolState):
     }
 
 
-# ==================================================
+# ============================================================
+# 20. INTERRUPT / HUMAN REVIEW
+# ============================================================
+
+def human_review(state: ProtocolState):
+
+    # IMPORTANT:
+    #
+    # Do NOT perform a non-idempotent database write
+    # before interrupt().
+    #
+    # When resumed, LangGraph starts this node again
+    # from the beginning.
+
+    reviewer_response = interrupt(
+        {
+            "question":
+                "Review the protocol impact assessment",
+
+            "protocol_id":
+                state.protocol_id,
+
+            "impact":
+                state.impact,
+
+            "changes":
+                state.analyzed_changes,
+
+            "evidence":
+                state.evidence,
+
+            "allowed_actions": [
+                "approve",
+                "revise",
+                "reject"
+            ]
+        }
+    )
+
+    # Command(resume=...) value appears here
+
+    decision = reviewer_response["action"]
+    comment = reviewer_response.get(
+        "comment",
+        ""
+    )
+
+    print(
+        f"Reviewer decision: {decision}"
+    )
+
+    return {
+        "review_decision": decision,
+        "review_comment": comment,
+        "review_status": decision
+    }
+
+
+# ============================================================
+# 22. IDEMPOTENT SIDE EFFECT
+# ============================================================
+
+def record_review(state: ProtocolState):
+
+    # Deterministic idempotency key
+    review_key = (
+        f"{state.protocol_id}:"
+        f"{state.old_version}:"
+        f"{state.new_version}"
+    )
+
+    # --------------------------------------------------------
+    # IDEMPOTENT UPSERT
+    # --------------------------------------------------------
+    #
+    # Same review_key will update the same record.
+    #
+    # It will NOT:
+    #
+    # INSERT row 1
+    # INSERT row 2
+    # INSERT row 3
+    #
+    # if this operation gets executed again.
+
+    REVIEW_STORE[review_key] = {
+        "protocol_id":
+            state.protocol_id,
+
+        "old_version":
+            state.old_version,
+
+        "new_version":
+            state.new_version,
+
+        "decision":
+            state.review_decision,
+
+        "comment":
+            state.review_comment
+    }
+
+    print(
+        f"Review persisted: {review_key}"
+    )
+
+    return {
+        "review_recorded": True
+    }
+
+
+# ============================================================
 # ROUTING FUNCTIONS
-# ==================================================
+# ============================================================
 
 def route_protocol(state: ProtocolState):
 
@@ -176,12 +320,15 @@ def route_protocol(state: ProtocolState):
     return END
 
 
+# ------------------------------------------------------------
+# SEND — dynamic fan-out
+# ------------------------------------------------------------
+
 def route_changes(state: ProtocolState):
 
     if not state.changes_found:
         return END
 
-    # Dynamic fan-out
     return [
         Send(
             "analyze_change",
@@ -193,144 +340,276 @@ def route_changes(state: ProtocolState):
     ]
 
 
+# ------------------------------------------------------------
+# BUSINESS LOOP
+# ------------------------------------------------------------
+
 def route_assessment(state: ProtocolState):
 
-    # Business condition satisfied
     if state.evidence_sufficient:
-        return END
+        return "human_review"
 
     # Safety condition
     if state.evidence_attempts >= 2:
-        return END
+        return "human_review"
 
-    # Business loop
     return "retrieve_evidence"
 
 
-# ==================================================
+# ============================================================
 # GRAPH
-# ==================================================
+# ============================================================
 
-graph = StateGraph(ProtocolState)
+builder = StateGraph(ProtocolState)
 
 
-# --------------------------------------------------
-# REGISTER NODES
-# --------------------------------------------------
+# ------------------------------------------------------------
+# NODES
+# ------------------------------------------------------------
 
-graph.add_node(
+builder.add_node(
     "retrieve_protocol",
     retrieve_protocol,
 
-    # Technical retry
     retry_policy=RetryPolicy(
         max_attempts=3,
         retry_on=ConnectionError
     )
 )
 
-graph.add_node(
+builder.add_node(
     "compare_protocols",
     compare_protocols
 )
 
-graph.add_node(
+builder.add_node(
     "extract_changes",
     extract_changes
 )
 
-graph.add_node(
+builder.add_node(
     "analyze_change",
     analyze_change
 )
 
-graph.add_node(
+builder.add_node(
     "assess_impact",
     assess_impact
 )
 
-graph.add_node(
+builder.add_node(
     "retrieve_evidence",
     retrieve_evidence
 )
 
+builder.add_node(
+    "human_review",
+    human_review
+)
 
-# ==================================================
+builder.add_node(
+    "record_review",
+    record_review
+)
+
+
+# ============================================================
 # EDGES
-# ==================================================
+# ============================================================
 
-# START
-graph.add_edge(
+builder.add_edge(
     START,
     "retrieve_protocol"
 )
 
 
-# Conditional:
-# protocol found → compare
-# not found → END
-graph.add_conditional_edges(
+builder.add_conditional_edges(
     "retrieve_protocol",
     route_protocol
 )
 
 
-# Normal edge
-graph.add_edge(
+builder.add_edge(
     "compare_protocols",
     "extract_changes"
 )
 
 
-# Conditional + Send:
-# no changes → END
-# changes → dynamic analyze_change executions
-graph.add_conditional_edges(
+# Send / dynamic fan-out
+builder.add_conditional_edges(
     "extract_changes",
     route_changes
 )
 
 
-# Fan-in:
-# all dynamically-created analyze_change tasks
-# feed into assess_impact
-graph.add_edge(
+# Send workers fan back in
+builder.add_edge(
     "analyze_change",
     "assess_impact"
 )
 
 
-# Business decision
-graph.add_conditional_edges(
+# Business loop OR human review
+builder.add_conditional_edges(
     "assess_impact",
     route_assessment
 )
 
 
-# Business loop
-graph.add_edge(
+# Evidence loop
+builder.add_edge(
     "retrieve_evidence",
     "assess_impact"
 )
 
 
-# ==================================================
-# COMPILE
-# ==================================================
-
-graph = graph.compile()
-
-
-# ==================================================
-# INVOKE
-# ==================================================
-
-response = graph.invoke({
-    "protocol_id": "PROTOCOL-001",
-    "old_version": "v1",
-    "new_version": "v2"
-})
+# After human resumes
+builder.add_edge(
+    "human_review",
+    "record_review"
+)
 
 
-print("\nFINAL STATE")
-print(response)
+builder.add_edge(
+    "record_review",
+    END
+)
+
+
+# ============================================================
+# 17. CHECKPOINTER
+# ============================================================
+
+checkpointer = InMemorySaver()
+
+
+# ============================================================
+# 19. PERSISTENCE ENABLED DURING COMPILE
+# ============================================================
+
+graph = builder.compile(
+    checkpointer=checkpointer
+)
+
+
+# ============================================================
+# 18. THREAD ID
+# ============================================================
+
+config = {
+    "configurable": {
+        "thread_id":
+            "protocol-PROTOCOL-001-review-001"
+    }
+}
+
+
+# ============================================================
+# FIRST RUN
+# ============================================================
+
+print("\n========== STARTING GRAPH ==========\n")
+
+result = graph.invoke(
+    {
+        "protocol_id":
+            "PROTOCOL-001",
+
+        "old_version":
+            "v1",
+
+        "new_version":
+            "v2"
+    },
+
+    config=config
+)
+
+
+# ============================================================
+# GRAPH SHOULD NOW BE PAUSED
+# ============================================================
+
+print("\n========== INTERRUPTED ==========\n")
+
+print(result)
+
+
+# ============================================================
+# 19. INSPECT PERSISTED STATE
+# ============================================================
+
+snapshot = graph.get_state(config)
+
+print("\n========== SAVED CHECKPOINT ==========\n")
+
+print("Saved state:")
+print(snapshot.values)
+
+print("\nNext node:")
+print(snapshot.next)
+
+
+# ============================================================
+# SIMULATE HUMAN REVIEWER
+# ============================================================
+
+print("\n========== HUMAN REVIEW ==========\n")
+
+decision = input(
+    "Enter decision "
+    "(approve / revise / reject): "
+).strip().lower()
+
+
+while decision not in {
+    "approve",
+    "revise",
+    "reject"
+}:
+    decision = input(
+        "Invalid decision. "
+        "Enter approve / revise / reject: "
+    ).strip().lower()
+
+
+comment = input(
+    "Reviewer comment: "
+)
+
+
+# ============================================================
+# 21. COMMAND(RESUME=...)
+# ============================================================
+
+print("\n========== RESUMING GRAPH ==========\n")
+
+final_result = graph.invoke(
+    Command(
+        resume={
+            "action": decision,
+            "comment": comment
+        }
+    ),
+
+    # SAME thread_id is critical
+    config=config
+)
+
+
+# ============================================================
+# FINAL RESULT
+# ============================================================
+
+print("\n========== FINAL STATE ==========\n")
+
+print(final_result)
+
+
+# ============================================================
+# SHOW IDEMPOTENT REVIEW RECORD
+# ============================================================
+
+print("\n========== REVIEW STORE ==========\n")
+
+print(REVIEW_STORE)
