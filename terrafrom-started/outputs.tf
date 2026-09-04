@@ -1,4 +1,3 @@
-output "instance_hostname" {
-  description = "Private DNS name of the EC2 instance."
-  value       = aws_instance.app_server.private_dns
+output "ecr_repository_url" {
+  value = aws_ecr_repository.elastic_container_registry.repository_url
 }
