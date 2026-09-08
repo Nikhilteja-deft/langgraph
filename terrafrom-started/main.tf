@@ -4,8 +4,9 @@ provider "aws" {
 
 
 resource "aws_ecr_repository" "elastic_container_registry" {
-  name                 = "myecr-langgraph"
+  name                 = "${local.prefix}-repo"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -41,7 +42,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.7.0"
 
-  name = "example-vpc"
+  name = "${local.prefix}-vpc"
   cidr = "10.0.0.0/16"
 
   azs             = ["us-east-1a", "us-east-1b", "us-east-1c"]
@@ -56,7 +57,7 @@ module "ecs" {
   source  = "terraform-aws-modules/ecs/aws"
   version = "~> 7.6"
 
-  cluster_name = "langgraph-cluster"
+  cluster_name = "${local.prefix}-cluster"
 
   cluster_capacity_providers = ["FARGATE"]
 
