@@ -9,3 +9,14 @@ variable "instance_type" {
   type        = string
   default     = "t3.micro"
 }
+
+variable "environment" {
+  type        = string
+  description = "Deployment environment name"
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be dev, staging, or prod."
+  }
+}

@@ -39,7 +39,7 @@ EOF
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.19.0"
+  version = "6.7.0"
 
   name = "example-vpc"
   cidr = "10.0.0.0/16"
@@ -51,3 +51,57 @@ module "vpc" {
   enable_dns_hostnames = true
 }
 
+
+module "ecs" {
+  source  = "terraform-aws-modules/ecs/aws"
+  version = "~> 7.6"
+
+  cluster_name = "langgraph-cluster"
+
+  cluster_capacity_providers = ["FARGATE"]
+
+  services = {
+    langgraph-service = {
+      cpu    = 256
+      memory = 512
+
+      assign_public_ip = true
+      subnet_ids       = module.vpc.public_subnets
+
+      container_definitions = {
+        fastapi-app = {
+          cpu       = 256
+          memory    = 512
+          essential = true
+
+          image                  = "${aws_ecr_repository.elastic_container_registry.repository_url}:latest"
+          readonlyRootFilesystem = false
+          portMappings = [
+            {
+              name          = "http"
+              containerPort = 8000
+              protocol      = "tcp"
+            }
+          ]
+        }
+      }
+
+      security_group_ingress_rules = {
+        allow_fastapi = {
+          description = "Allow FastAPI traffic"
+          from_port   = 8000
+          to_port     = 8000
+          ip_protocol = "tcp"
+          cidr_ipv4   = "0.0.0.0/0"
+        }
+      }
+
+      security_group_egress_rules = {
+        allow_all_outbound = {
+          ip_protocol = "-1"
+          cidr_ipv4   = "0.0.0.0/0"
+        }
+      }
+    }
+  }
+}
