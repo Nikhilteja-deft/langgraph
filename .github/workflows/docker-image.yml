@@ -28,9 +28,17 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: langgraph-prod-repo
         IMAGE_TAG: latest
-      run: |
+      run:
         # Build the Docker image
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         
         # Push the image to AWS ECR
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+    - name: Force ECS Deployment
+      run: |
+        aws ecs update-service \
+        --cluster langgraph-prod-cluster \
+        --service langgraph-prod-service \
+        --force-new-deployment
+
