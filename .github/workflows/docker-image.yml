@@ -39,5 +39,5 @@ jobs:
       run: |
         aws ecs update-service \
           --cluster langgraph-prod-cluster \
-          --service langgraph-prod-service \
+          --service langgraph-service \
           --force-new-deployment
