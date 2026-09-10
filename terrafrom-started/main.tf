@@ -92,7 +92,7 @@ module "ecs" {
           portMappings = [
             {
               name          = "http"
-              containerPort = 8000
+              containerPort = 8080
               protocol      = "tcp"
             }
           ]
@@ -102,8 +102,8 @@ module "ecs" {
       security_group_ingress_rules = {
         allow_fastapi = {
           description = "Allow FastAPI traffic"
-          from_port   = 8000
-          to_port     = 8000
+          from_port   = 8080
+          to_port     = 8080
           ip_protocol = "tcp"
           cidr_ipv4   = "0.0.0.0/0"
         }
