@@ -62,7 +62,7 @@ module "ecs" {
   cluster_capacity_providers = ["FARGATE"]
 
   services = {
-    langgraph-service = {
+    "${local.prefix}-service" = {
       cpu    = 256
       memory = 512
 
@@ -71,8 +71,8 @@ module "ecs" {
 
       tasks_iam_role_statements = [
         {
-          effect    = "Allow"
-          actions   = [
+          effect = "Allow"
+          actions = [
             "bedrock:InvokeModel",
             "bedrock:InvokeModelWithResponseStream"
           ]
@@ -86,8 +86,9 @@ module "ecs" {
           memory    = 512
           essential = true
 
-          image                  = "${aws_ecr_repository.elastic_container_registry.repository_url}:latest"
-          readonlyRootFilesystem = false
+          cloudwatch_log_group_name = "/aws/ecs/${local.prefix}/fastapi-app"
+          image                     = "${aws_ecr_repository.elastic_container_registry.repository_url}:latest"
+          readonlyRootFilesystem    = false
           portMappings = [
             {
               name          = "http"
