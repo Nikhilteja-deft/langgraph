@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi<0.140.0",
     "fastapi-jsonrpc>=3.5.0",
+    "langchain-aws>=1.7.5",
     "langgraph>=1.2.11",
     "pydantic>=2.13.4",
     "uvicorn[standard]>=0.52.4",

@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send, RetryPolicy, interrupt, Command
 from langgraph.runtime import Runtime
 from langgraph.checkpoint.memory import InMemorySaver
-
+from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel, Field
 from typing import Annotated
 import operator
@@ -138,19 +138,43 @@ def extract_changes(state: ProtocolState):
 # ------------------------------------------------------------
 # SEND WORKER
 # ------------------------------------------------------------
+model = ChatBedrockConverse(
+    model_id="us.amazon.nova-pro-v1:0",
+    region_name="us-east-1",
+    max_retries=0
+)
+
 
 def analyze_change(state: dict):
-
     current_change = state["current_change"]
 
-    print(
-        f"Analyzing: {current_change}"
-    )
+    print(f"Calling Bedrock for: {current_change}")
+
+    try:
+        response = model.invoke(
+            f"""
+            Analyze this clinical protocol amendment change:
+
+            {current_change}
+
+            Explain:
+            - site operational impact
+            - patient impact
+            - implementation risk
+            """
+        )
+        print("Bedrock response received")
+        result_text = response.content
+    except Exception as e:
+        print(f"⚠️ Bedrock call failed for '{current_change}': {e}")
+        # Fallback response so the graph doesn't crash
+        result_text = (
+            f"[Fallback Analysis] Change: {current_change} - "
+            f"Unable to reach LLM ({type(e).__name__}). Flagged for manual review."
+        )
 
     return {
-        "analyzed_changes": [
-            f"Analyzed {current_change}"
-        ]
+        "analyzed_changes": [result_text]
     }
 
 

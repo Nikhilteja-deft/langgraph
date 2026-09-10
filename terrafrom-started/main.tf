@@ -69,6 +69,17 @@ module "ecs" {
       assign_public_ip = true
       subnet_ids       = module.vpc.public_subnets
 
+      tasks_iam_role_statements = [
+        {
+          effect    = "Allow"
+          actions   = [
+            "bedrock:InvokeModel",
+            "bedrock:InvokeModelWithResponseStream"
+          ]
+          resources = ["*"]
+        }
+      ]
+
       container_definitions = {
         fastapi-app = {
           cpu       = 256
